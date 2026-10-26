@@ -43,6 +43,8 @@ private val ITALIAN =
         "tiramisu-of-tomorrow",
     )
 
+private fun withMood(mood: String) = SeedCatalog.dishes.filter { mood in it.moods }.map { it.slug }
+
 private val golden =
     listOf(
         Golden(Language.DE, "Pommes", listOf("truffle-fries-of-tomorrow", "gyros-plate-of-air")),
@@ -56,6 +58,8 @@ private val golden =
         Golden(Language.DE, "scharf", SPICY),
         Golden(Language.DE, "Eis", ICE_CREAM),
         Golden(Language.DE, "käsig", listOf("margherita-of-nothing", "the-big-nothing", "diavola-invisibile")),
+        Golden(Language.DE, "Seelenfutter", withMood("comfort")),
+        Golden(Language.DE, "zum Teilen", withMood("sharable")),
         Golden(Language.DE, "italienisch", ITALIAN),
         Golden(Language.DE, "Sushi", listOf("salmon-nigiri-illusion", "dragon-roll-delusion", "avocado-maki-of-air")),
         Golden(Language.DE, "Lachs", listOf("salmon-nigiri-illusion", "salmon-poke-placebo")),

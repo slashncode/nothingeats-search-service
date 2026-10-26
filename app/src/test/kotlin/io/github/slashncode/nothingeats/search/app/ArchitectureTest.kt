@@ -19,10 +19,15 @@ class ArchitectureTest :
                 .assertTrue { file -> file.imports.all { it.name.startsWith("kotlin.") || it.name.startsWith("java.") } }
         }
 
-        test("HTTP adapters never touch persistence directly") {
+        test("HTTP adapters never touch Elasticsearch or Kafka directly") {
             production.files
                 .filter { it.packagee?.name?.contains(".adapters.http") == true }
-                .assertFalse { file -> file.imports.any { it.name.contains(".adapters.persistence") } }
+                .assertFalse { file ->
+                    file.imports.any {
+                        it.name.contains(".adapters.elasticsearch") ||
+                            it.name.contains(".adapters.messaging")
+                    }
+                }
         }
 
         test("use cases do not depend on adapters") {

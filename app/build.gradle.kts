@@ -11,6 +11,7 @@ dependencies {
     implementation(platform(libs.nothingeats.platform.bom))
     implementation(project(":adapters"))
 
+    testImplementation(testFixtures(project(":adapters")))
     testImplementation(libs.nothingeats.platform.testing)
     testImplementation(libs.konsist)
 }

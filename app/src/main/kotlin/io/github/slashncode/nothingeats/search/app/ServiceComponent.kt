@@ -6,27 +6,40 @@ import io.github.slashncode.nothingeats.platform.core.lifecycle.HealthChecks
 import io.github.slashncode.nothingeats.platform.core.lifecycle.LifecycleComponent
 import io.github.slashncode.nothingeats.platform.core.lifecycle.LifecycleManager
 import io.github.slashncode.nothingeats.platform.core.lifecycle.Readiness
+import io.github.slashncode.nothingeats.platform.core.run.CronTask
 import io.github.slashncode.nothingeats.platform.core.run.ServiceRunner
 import io.github.slashncode.nothingeats.platform.http.ExceptionReporter
 import io.github.slashncode.nothingeats.platform.http.HttpExtension
 import io.github.slashncode.nothingeats.platform.http.HttpRoutes
 import io.github.slashncode.nothingeats.platform.http.HttpServer
 import io.github.slashncode.nothingeats.platform.http.auth.JwtAuth
-import io.github.slashncode.nothingeats.platform.persistence.FlywayMigrations
-import io.github.slashncode.nothingeats.platform.persistence.PostgresDatabase
+import io.github.slashncode.nothingeats.platform.kafka.EventConsumer
+import io.github.slashncode.nothingeats.platform.kafka.EventConsumerConfig
+import io.github.slashncode.nothingeats.platform.kafka.EventHandler
+import io.github.slashncode.nothingeats.platform.kafka.KafkaClients
 import io.github.slashncode.nothingeats.platform.posthog.PostHogAnalytics
 import io.github.slashncode.nothingeats.platform.posthog.PostHogExceptionReporter
 import io.github.slashncode.nothingeats.platform.posthog.PostHogHttpExtension
-import io.github.slashncode.nothingeats.search.adapters.http.ItemRoutes
-import io.github.slashncode.nothingeats.search.adapters.persistence.ExposedItemRepository
-import io.github.slashncode.nothingeats.search.application.CreateItem
-import io.github.slashncode.nothingeats.search.application.GetItem
-import io.github.slashncode.nothingeats.search.application.ItemRepository
+import io.github.slashncode.nothingeats.search.adapters.cron.ReindexTask
+import io.github.slashncode.nothingeats.search.adapters.elasticsearch.ElasticsearchClient
+import io.github.slashncode.nothingeats.search.adapters.elasticsearch.ElasticsearchSearch
+import io.github.slashncode.nothingeats.search.adapters.elasticsearch.SearchIndicesBootstrap
+import io.github.slashncode.nothingeats.search.adapters.http.SearchRoutes
+import io.github.slashncode.nothingeats.search.adapters.messaging.CatalogEventHandler
+import io.github.slashncode.nothingeats.search.adapters.messaging.KafkaCatalogLog
+import io.github.slashncode.nothingeats.search.application.CatalogLog
+import io.github.slashncode.nothingeats.search.application.DishIndex
+import io.github.slashncode.nothingeats.search.application.EnsureLiveGeneration
+import io.github.slashncode.nothingeats.search.application.ProjectCatalog
+import io.github.slashncode.nothingeats.search.application.Reindex
+import io.github.slashncode.nothingeats.search.application.RestaurantDirectory
+import io.github.slashncode.nothingeats.search.application.SearchDishes
+import io.github.slashncode.nothingeats.search.application.SearchIndices
+import io.github.slashncode.nothingeats.search.application.SuggestDishes
 import me.tatarka.inject.annotations.Component
 import me.tatarka.inject.annotations.IntoSet
 import me.tatarka.inject.annotations.Provides
 import me.tatarka.inject.annotations.Scope
-import java.time.Clock
 
 @Scope
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION, AnnotationTarget.PROPERTY_GETTER)
@@ -34,7 +47,7 @@ annotation class ServiceScope
 
 /**
  * The composition root: the only place that wires ports to adapters.
- * Lifecycle components, health checks and routes are collected with `@IntoSet`, never listed by hand.
+ * Lifecycle components, health checks, routes, event handlers and cron tasks are collected with `@IntoSet`.
  * [jwtAuth] is passed in so tests can use test signing keys.
  */
 @ServiceScope
@@ -45,24 +58,13 @@ abstract class ServiceComponent(
 ) {
     abstract val runner: ServiceRunner
     abstract val lifecycle: LifecycleManager
-    abstract val migrations: FlywayMigrations
+    abstract val search: ElasticsearchSearch
 
     // Platform
 
     @ServiceScope
     @Provides
     fun readiness(): Readiness = Readiness()
-
-    @Provides
-    fun clock(): Clock = Clock.systemUTC()
-
-    @ServiceScope
-    @Provides
-    fun flywayMigrations(): FlywayMigrations = FlywayMigrations(config.database)
-
-    @ServiceScope
-    @Provides
-    fun postgres(migrations: FlywayMigrations): PostgresDatabase = PostgresDatabase(config.database, migrations)
 
     @ServiceScope
     @Provides
@@ -100,43 +102,104 @@ abstract class ServiceComponent(
         readiness: Readiness,
     ): LifecycleManager = LifecycleManager(components, readiness, config.lifecycle.drainDelay)
 
+    /** No migrations: there is no database. */
     @Provides
     fun serviceRunner(
         lifecycle: LifecycleManager,
-        migrations: FlywayMigrations,
-    ): ServiceRunner = ServiceRunner(lifecycle, migrations)
-
-    @IntoSet
-    @Provides
-    fun postgresLifecycle(postgres: PostgresDatabase): LifecycleComponent = postgres
-
-    @IntoSet
-    @Provides
-    fun postgresHealth(postgres: PostgresDatabase): HealthCheck = postgres
+        cronTasks: Set<CronTask>,
+    ): ServiceRunner = ServiceRunner(lifecycle, migrations = null, cronTasks = cronTasks)
 
     @IntoSet
     @Provides
     fun httpLifecycle(server: HttpServer): LifecycleComponent = server
 
-    // Items
+    // Elasticsearch
 
+    @ServiceScope
     @Provides
-    fun itemRepository(postgres: PostgresDatabase): ItemRepository = ExposedItemRepository(postgres)
-
-    @Provides
-    fun createItem(
-        items: ItemRepository,
-        clock: Clock,
-        analytics: ProductAnalytics,
-    ): CreateItem = CreateItem(items, clock, analytics)
-
-    @Provides
-    fun getItem(items: ItemRepository): GetItem = GetItem(items)
+    fun elasticsearchClient(): ElasticsearchClient = ElasticsearchClient(config.elasticsearch)
 
     @IntoSet
     @Provides
-    fun itemRoutes(
-        createItem: CreateItem,
-        getItem: GetItem,
-    ): HttpRoutes = ItemRoutes(createItem, getItem)
+    fun elasticsearchHealth(client: ElasticsearchClient): HealthCheck = client
+
+    @ServiceScope
+    @Provides
+    fun elasticsearchSearch(client: ElasticsearchClient): ElasticsearchSearch =
+        ElasticsearchSearch(client, indexPrefix = config.elasticsearch.indexPrefix)
+
+    @Provides
+    fun searchIndices(search: ElasticsearchSearch): SearchIndices = search
+
+    @Provides
+    fun dishIndex(search: ElasticsearchSearch): DishIndex = search
+
+    @Provides
+    fun restaurantDirectory(search: ElasticsearchSearch): RestaurantDirectory = search
+
+    @IntoSet
+    @Provides
+    fun searchIndicesBootstrap(indices: SearchIndices): LifecycleComponent = SearchIndicesBootstrap(EnsureLiveGeneration(indices))
+
+    // Catalog projection
+
+    @Provides
+    fun projectCatalog(indices: SearchIndices): ProjectCatalog = ProjectCatalog(indices)
+
+    @IntoSet
+    @Provides
+    fun dishEvents(project: ProjectCatalog): EventHandler = CatalogEventHandler(config.catalogTopics.dishes, project)
+
+    @IntoSet
+    @Provides
+    fun restaurantEvents(project: ProjectCatalog): EventHandler = CatalogEventHandler(config.catalogTopics.restaurants, project)
+
+    /** No inbox (db = null): documents carry the record offset as version, so every write is idempotent. */
+    @ServiceScope
+    @Provides
+    fun eventConsumer(handlers: Set<EventHandler>): EventConsumer =
+        EventConsumer(
+            config = EventConsumerConfig(groupId = "search-service"),
+            handlers = handlers,
+            db = null,
+            consumerFactory = { KafkaClients.consumer(config.kafka, "search-service") },
+            deadLetters = KafkaClients.producer(config.kafka, "search-service-dlq"),
+        )
+
+    @IntoSet
+    @Provides
+    fun eventConsumerLifecycle(consumer: EventConsumer): LifecycleComponent = consumer
+
+    @IntoSet
+    @Provides
+    fun eventConsumerHealth(consumer: EventConsumer): HealthCheck = consumer
+
+    @Provides
+    fun catalogLog(): CatalogLog = KafkaCatalogLog(config.kafka, config.catalogTopics)
+
+    @IntoSet
+    @Provides
+    fun reindex(
+        indices: SearchIndices,
+        log: CatalogLog,
+    ): CronTask = ReindexTask(Reindex(indices, log))
+
+    // Search
+
+    @Provides
+    fun searchDishes(
+        index: DishIndex,
+        restaurants: RestaurantDirectory,
+        analytics: ProductAnalytics,
+    ): SearchDishes = SearchDishes(index, restaurants, analytics)
+
+    @Provides
+    fun suggestDishes(index: DishIndex): SuggestDishes = SuggestDishes(index)
+
+    @IntoSet
+    @Provides
+    fun searchRoutes(
+        search: SearchDishes,
+        suggest: SuggestDishes,
+    ): HttpRoutes = SearchRoutes(search, suggest)
 }

@@ -1,0 +1,144 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "analysis": {
+      "filter": {
+        "german_stop": { "type": "stop", "stopwords": "_german_" },
+        "german_stemmer": { "type": "stemmer", "language": "light_german" },
+        "german_food_words": {
+          "type": "dictionary_decompounder",
+          "only_longest_match": false,
+          "min_subword_size": 3,
+          "word_list": [
+            "pommes", "pizza", "burger", "salat", "suppe", "nudel", "nudeln", "brot", "käse", "curry", "reis",
+            "knoblauch", "hähnchen", "huhn", "garnelen", "lachs", "thunfisch", "tofu", "spieß", "teller", "sorbet",
+            "schoko", "karamell", "mango", "pistazien", "tomaten", "zwiebel", "zwiebelringe", "ringe", "wrap", "bowl",
+            "trüffel", "vanille", "kokos", "sesam", "spinat", "lamm", "rind", "schwein", "gemüse", "frühlings", "rollen",
+            "tiramisu", "shake", "dip", "keks", "teig", "sushi", "algen", "seetang", "wasser", "lassi", "naan"
+          ]
+        },
+        "german_synonyms": {
+          "type": "synonym_graph",
+          "synonyms": [
+            "pommes, pommes frites, fritten, fries",
+            "nudel, nudeln, pasta, noodles",
+            "eis, eiscreme, speiseeis, vanilleeis, gelato, ice cream",
+            "scharf, pikant, feurig, spicy",
+            "käsig, cheesy",
+            "knusprig, crispy",
+            "süß, sweet",
+            "cremig, creamy",
+            "herzhaft, deftig, hearty",
+            "salzig, salty",
+            "frisch, fresh",
+            "leicht, light",
+            "vegetarisch, vegetarian",
+            "glutenfrei, gluten_free",
+            "laktosefrei, lactose_free",
+            "italienisch, italian",
+            "griechisch, greek",
+            "indisch, indian",
+            "asiatisch, asian",
+            "japanisch, japanese",
+            "amerikanisch, american",
+            "hawaiianisch, hawaiian",
+            "nachtisch, dessert, desserts",
+            "hähnchen, hühnchen, huhn, chicken",
+            "rind, rindfleisch, beef",
+            "burger, hamburger",
+            "vegan, pflanzlich, plant based"
+          ]
+        },
+        "english_stop": { "type": "stop", "stopwords": "_english_" },
+        "english_stemmer": { "type": "stemmer", "language": "english" },
+        "english_possessive": { "type": "stemmer", "language": "possessive_english" },
+        "english_synonyms": {
+          "type": "synonym_graph",
+          "synonyms": [
+            "fries, chips, french fries, pommes",
+            "noodles, pasta, nudeln",
+            "ice cream, gelato, eis",
+            "spicy, hot, fiery, scharf",
+            "chicken, poultry",
+            "burger, hamburger",
+            "vegan, plant based",
+            "dessert, desserts"
+          ]
+        }
+      },
+      "analyzer": {
+        "german_text": {
+          "tokenizer": "standard",
+          "filter": ["lowercase", "german_food_words", "german_stop", "german_normalization", "german_stemmer"]
+        },
+        "german_query": {
+          "tokenizer": "standard",
+          "filter": ["lowercase", "german_synonyms", "german_stop", "german_normalization", "german_stemmer"]
+        },
+        "english_text": {
+          "tokenizer": "standard",
+          "filter": ["english_possessive", "lowercase", "english_stop", "english_stemmer"]
+        },
+        "english_query": {
+          "tokenizer": "standard",
+          "filter": ["english_possessive", "lowercase", "english_synonyms", "english_stop", "english_stemmer"]
+        },
+        "suggest": {
+          "tokenizer": "standard",
+          "filter": ["lowercase", "asciifolding"]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "id": { "type": "keyword" },
+      "restaurantId": { "type": "keyword" },
+      "restaurantSlug": { "type": "keyword" },
+      "restaurantName": {
+        "type": "text",
+        "analyzer": "suggest",
+        "fields": { "suggest": { "type": "search_as_you_type", "analyzer": "suggest" } }
+      },
+      "cuisine": { "type": "keyword", "fields": { "de": { "type": "text", "analyzer": "german_text", "search_analyzer": "german_query" }, "en": { "type": "text", "analyzer": "english_text", "search_analyzer": "english_query" } } },
+      "slug": { "type": "keyword" },
+      "section": {
+        "properties": {
+          "de": { "type": "text", "analyzer": "german_text", "search_analyzer": "german_query" },
+          "en": { "type": "text", "analyzer": "english_text", "search_analyzer": "english_query" }
+        }
+      },
+      "name": {
+        "properties": {
+          "de": {
+            "type": "text",
+            "analyzer": "german_text",
+            "search_analyzer": "german_query",
+            "fields": { "suggest": { "type": "search_as_you_type", "analyzer": "suggest" } }
+          },
+          "en": {
+            "type": "text",
+            "analyzer": "english_text",
+            "search_analyzer": "english_query",
+            "fields": { "suggest": { "type": "search_as_you_type", "analyzer": "suggest" } }
+          }
+        }
+      },
+      "description": {
+        "properties": {
+          "de": { "type": "text", "analyzer": "german_text", "search_analyzer": "german_query" },
+          "en": { "type": "text", "analyzer": "english_text", "search_analyzer": "english_query" }
+        }
+      },
+      "priceCents": { "type": "long" },
+      "dietary": { "type": "keyword", "fields": { "de": { "type": "text", "analyzer": "german_text", "search_analyzer": "german_query" }, "en": { "type": "text", "analyzer": "english_text", "search_analyzer": "english_query" } } },
+      "allergens": { "type": "keyword" },
+      "spiceLevel": { "type": "integer" },
+      "calories": { "type": "integer" },
+      "moods": { "type": "keyword", "fields": { "de": { "type": "text", "analyzer": "german_text", "search_analyzer": "german_query" }, "en": { "type": "text", "analyzer": "english_text", "search_analyzer": "english_query" } } },
+      "available": { "type": "boolean" }
+    }
+  }
+}

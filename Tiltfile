@@ -28,5 +28,8 @@ k8s_yaml(local(
     quiet=True,
 ))
 
-k8s_resource(release + '-migrate', labels=['service'])
-k8s_resource(release, resource_deps=[release + '-migrate'], port_forwards=['18080:8080'], labels=['service'])
+# Services without a database turn the migrate hook off (`migrations.enabled: false`).
+migrations = str(local(['bash', '-c', 'yq ".spec.values.migrations.enabled != false" "$0"', gitops_release], quiet=True)).strip() == 'true'
+if migrations:
+    k8s_resource(release + '-migrate', labels=['service'])
+k8s_resource(release, resource_deps=[release + '-migrate'] if migrations else [], port_forwards=['18080:8080'], labels=['service'])

@@ -132,6 +132,10 @@ class ElasticsearchSearchTest :
         test("suggestions complete dish and restaurant names, accents folded") {
             val search = seeded()
 
+            // German compounds complete from their parts, too: "pomm" → "Trüffelpommes".
+            search.suggest("pomm", Language.DE, 8).map { it.text } shouldContain "Trüffelpommes von morgen"
+            search.suggest("brot", Language.DE, 8).map { it.text } shouldContain "Geister-Knoblauchbrot"
+
             val pho = search.suggest("pho", Language.DE, 8)
             pho.map { it.text } shouldContain "Phở Bò aus Nichts"
 

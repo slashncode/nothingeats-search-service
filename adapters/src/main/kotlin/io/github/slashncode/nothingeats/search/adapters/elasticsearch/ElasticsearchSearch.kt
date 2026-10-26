@@ -382,7 +382,7 @@ class ElasticsearchSearch(
 
     companion object {
         /** Bump with every change to `resources/elasticsearch/`, then run `cron reindex`. */
-        const val MAPPING_VERSION = 2
+        const val MAPPING_VERSION = 3
         private const val NOT_FOUND = 404
         private const val CONFLICT = 409
         private const val FACET_SIZE = 30

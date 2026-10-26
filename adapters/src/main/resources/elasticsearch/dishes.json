@@ -90,6 +90,10 @@
         "suggest": {
           "tokenizer": "standard",
           "filter": ["lowercase", "asciifolding"]
+        },
+        "suggest_german": {
+          "tokenizer": "standard",
+          "filter": ["lowercase", "german_food_words", "asciifolding"]
         }
       }
     }
@@ -119,7 +123,7 @@
             "type": "text",
             "analyzer": "german_text",
             "search_analyzer": "german_query",
-            "fields": { "suggest": { "type": "search_as_you_type", "analyzer": "suggest" } }
+            "fields": { "suggest": { "type": "search_as_you_type", "analyzer": "suggest_german", "search_analyzer": "suggest" } }
           },
           "en": {
             "type": "text",

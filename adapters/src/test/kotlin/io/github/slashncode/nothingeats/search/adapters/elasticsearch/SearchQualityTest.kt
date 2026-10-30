@@ -73,6 +73,7 @@ private val golden =
         Golden(Language.EN, "ice cream", ICE_CREAM),
         Golden(Language.EN, "chiken", listOf("chicken-souvlaki-specter", "butter-chicken-but-not", "crispy-chicken-cloud")),
         Golden(Language.EN, "salmon", listOf("salmon-nigiri-illusion", "salmon-poke-placebo")),
+        Golden(Language.EN, "pizza", listOf("margherita-of-nothing", "diavola-invisibile", "vegan-vapor-pizza")),
         // Word starts, as people type them before they finish (or give up).
         Golden(Language.EN, "burg", listOf("beyond-air-burger", "the-big-nothing", "crispy-chicken-cloud")),
         Golden(Language.EN, "marg", listOf("margherita-of-nothing")),

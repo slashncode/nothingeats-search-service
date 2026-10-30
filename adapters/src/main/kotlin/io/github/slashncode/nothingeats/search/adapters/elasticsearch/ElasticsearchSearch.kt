@@ -307,6 +307,9 @@ class ElasticsearchSearch(
                                 add("section.$lang^1.5")
                                 add("description.$lang")
                             }
+                            // The best field counts fully, the others a little: a pizza (section
+                            // "Pizza" at Phantom Pizza) beats the tiramisu that only shares the restaurant.
+                            put("tie_breaker", TIE_BREAKER)
                             put("fuzziness", FUZZINESS)
                             put("prefix_length", 1)
                             minimumShouldMatch?.let { put("minimum_should_match", it) }
@@ -658,6 +661,7 @@ class ElasticsearchSearch(
         private const val CONFLICT = 409
         private const val KEYWORD_BOOST = 1.5
         private const val PREFIX_BOOST = 2.0
+        private const val TIE_BREAKER = 0.3
 
         // No typos below five letters (there a word is more likely unfinished, and one edit reaches
         // too much: "marg" → "Magen"), one up to seven, two from eight.

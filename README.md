@@ -1,6 +1,6 @@
 # nothingeats-search-service
 
-Search bounded context of [NothingEats](https://github.com/slashncode/nothingeats): dish search with facets and search-as-you-type over the catalog, in German and English. Later it also serves the retrieval API for the Craving Coach (RAG).
+Search bounded context of [NothingEats](https://github.com/slashncode/nothingeats): dish search with facets and search-as-you-type over the catalog, in German and English, and the hybrid retrieval (keywords and meaning) behind the Craving Coach, the AI chat in `nothingeats-assistant-service`.
 
 Search is a **read model**: it owns no data and has no database. Everything in Elasticsearch is a projection of the catalog's compacted Kafka topics and can be rebuilt from them at any time.
 
@@ -18,6 +18,20 @@ Search is a **read model**: it owns no data and has no database. Everything in E
 - Errors are RFC 9457 problems; invalid parameters are `422 SEARCH_INVALID` with the field.
 - Every search is captured as the PostHog event `search_performed` (normalised query, language, result count, filters used, page) with the visitor's distinct id from the request headers, including zero-result searches.
 
+## Retrieval for the Craving Coach (gRPC, `nothingeats.search.v1.SearchService`)
+
+The contract lives in `grpc-api/src/main/proto` (buf lint and buf breaking in CI); the assistant (TypeScript) generates its client from it. Every call carries the customer's access token, forwarded by the assistant.
+
+| RPC | What |
+|---|---|
+| `Retrieve` | The dishes that fit a craving: free text, keywords, words no dish may mention, hard filters (cuisine, diet, allergens, mood, spice, price, open now), a semantic weight and a limit (1–20). Unavailable dishes never come back. |
+| `GetDishes` | Dishes by id in the order asked (the assistant checks recommendations against the catalog with it). |
+| `DescribeCatalog` | Every cuisine, diet tag, mood and allergen the available dishes use, with counts: the vocabulary the model may filter by. |
+
+- **Hybrid**: one `_msearch` runs a keyword leg (BM25 with the search analyzers and synonyms; a sentence must match on most of its words) and a meaning leg (kNN on dish embeddings) under the same hard filters. Weighted reciprocal rank fusion merges them (k = 60, semantic weight 0.7 by default).
+- **Embeddings**: one vector per dish from a text with both languages, cuisine, moods, diet, heat and calories (`embeddingText()`), and one per query, both from the same model in this service. `EMBEDDINGS__PROVIDER=OPENAI` uses `text-embedding-3-large` shortened to 1024 dimensions; the default `HASHING` (feature hashing) needs no key and knows no meaning, for tests and clusters without a key. Vectors are cached in Valkey by model and text hash for 30 days.
+- **Degrades instead of failing**: a dish the model cannot embed is indexed without a vector (words only until the next reindex); a query it cannot embed is answered by keywords only (`semantic = false`); an index that cannot take vectors (older mapping, other dimensions) gets the dish without one.
+
 ## How the index works
 
 - **Generations**: each index build creates `dishes-v<mapping>-<millis>` and `restaurants-v<mapping>-<millis>`; readers and the live projection only use the aliases `dishes` and `restaurants`.
@@ -30,13 +44,20 @@ Search is a **read model**: it owns no data and has no database. Everything in E
 
 `SearchQualityTest` runs golden queries against the catalog seed (a copy in `adapters/src/testFixtures/resources/seed`) and fails below Recall@5 0.95 or MRR 0.95. The report lands in `adapters/build/reports/search-quality.md`. Tune analyzers and boosts against it, and add a golden query for every search complaint.
 
+`RetrievalQualityTest` does the same for retrieval: 16 cravings in the customer's words ("Etwas Warmes für einen verregneten Abend") and 12 dish names as typed into a search box, against real `text-embedding-3-large` vectors recorded in `adapters/src/test/resources/embeddings/` (no key or network needed in CI). It sweeps the semantic weight from 0 to 1 and fails when the default trails either leg or drops below Recall@5 0.88 / MRR 0.9; the report lands in `adapters/build/reports/retrieval-quality.md`. A new golden text or a changed embedding text needs a new recording:
+
+```bash
+RECORD_EMBEDDINGS=true OPENAI_API_KEY=... ./gradlew :adapters:test --tests '*RetrievalQualityTest'
+```
+
 ## Run
 
 ```bash
 ./gradlew build                     # compile, ktlint, tests (Docker needed: Elasticsearch and Kafka via Testcontainers)
 
-# against the local k3d cluster from the host (Elasticsearch on 19200, Kafka on 19094)
-export ELASTICSEARCH__USERNAME=search-service ELASTICSEARCH__PASSWORD=...
+# against the local k3d cluster from the host (Elasticsearch on 19200, Kafka on 19094, Valkey on 16379)
+export ELASTICSEARCH__USERNAME=search-service ELASTICSEARCH__PASSWORD=... VALKEY__PASSWORD=...
+export EMBEDDINGS__PROVIDER=OPENAI EMBEDDINGS__OPENAI__API_KEY=...   # optional; hashing otherwise
 ./gradlew :app:run --args="cron reindex"
 ./gradlew :app:run
 

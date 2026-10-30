@@ -29,7 +29,7 @@ class SearchUseCasesTest :
         test("projection keeps the newest version of each document") {
             val indices = InMemorySearchIndices()
             EnsureLiveGeneration(indices)()
-            val project = ProjectCatalog(indices)
+            val project = ProjectCatalog(indices, DishVectors(FakeEmbeddingModel()))
 
             project(CatalogEvent.DishPublished(dish("d1").copy(priceCents = 990), version = 5))
             project(CatalogEvent.DishPublished(dish("d1").copy(priceCents = 1290), version = 3))
@@ -51,7 +51,7 @@ class SearchUseCasesTest :
                 )
             log.producedDuringReindex += CatalogEvent.DishPublished(dish("d3"), 2)
 
-            val result = Reindex(indices, log)()
+            val result = Reindex(indices, log, DishVectors(FakeEmbeddingModel()))()
 
             result.replaced shouldBe old
             result.events shouldBe 4

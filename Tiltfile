@@ -17,7 +17,7 @@ arch = 'arm64' if str(local('uname -m', quiet=True)).strip() in ['arm64', 'aarch
 custom_build(
     image,
     './gradlew :app:jib --console=plain -Djib.to.image=$EXPECTED_REF -Djib.allowInsecureRegistries=true -Djib.from.platforms=linux/' + arch,
-    deps=['domain/src', 'application/src', 'adapters/src', 'app/src', os.path.join(workspace, 'nothingeats-kotlin-platform')],
+    deps=['grpc-api/src', 'domain/src', 'application/src', 'adapters/src', 'app/src', os.path.join(workspace, 'nothingeats-kotlin-platform')],
     ignore=['**/build', '**/.gradle', '**/.kotlin'],
     skips_local_docker=True,
 )

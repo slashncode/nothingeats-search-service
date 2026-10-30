@@ -30,6 +30,12 @@ jobs:
       packages: write # push the image to GHCR
       id-token: write # keyless cosign signing
 
+  # The gRPC contract: lint and no breaking changes (record 032).
+  buf:
+    uses: slashncode/nothingeats-ci/.github/workflows/buf.yml@main
+    permissions:
+      contents: read
+
   codeql:
     uses: slashncode/nothingeats-ci/.github/workflows/codeql.yml@main
     permissions:

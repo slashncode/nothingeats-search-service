@@ -1,6 +1,9 @@
 package io.github.slashncode.nothingeats.search.app
 
 import io.github.slashncode.nothingeats.platform.core.run.RunMode
+import io.github.slashncode.nothingeats.platform.grpc.GrpcChannel
+import io.github.slashncode.nothingeats.platform.grpc.GrpcClientConfig
+import io.github.slashncode.nothingeats.platform.grpc.GrpcServerConfig
 import io.github.slashncode.nothingeats.platform.http.HttpServerConfig
 import io.github.slashncode.nothingeats.platform.kafka.CloudEvent
 import io.github.slashncode.nothingeats.platform.kafka.EventJson
@@ -8,11 +11,23 @@ import io.github.slashncode.nothingeats.platform.kafka.KafkaClients
 import io.github.slashncode.nothingeats.platform.kafka.KafkaConfig
 import io.github.slashncode.nothingeats.platform.testing.KafkaTestCluster
 import io.github.slashncode.nothingeats.platform.testing.TestTokens
+import io.github.slashncode.nothingeats.platform.testing.ValkeyTestServer
 import io.github.slashncode.nothingeats.search.adapters.ElasticsearchTestServer
 import io.github.slashncode.nothingeats.search.adapters.SeedCatalog
 import io.github.slashncode.nothingeats.search.adapters.messaging.CatalogTopics
+import io.github.slashncode.nothingeats.search.grpc.v1.SearchServiceGrpcKt
+import io.github.slashncode.nothingeats.search.grpc.v1.describeCatalogRequest
+import io.github.slashncode.nothingeats.search.grpc.v1.filters
+import io.github.slashncode.nothingeats.search.grpc.v1.getDishesRequest
+import io.github.slashncode.nothingeats.search.grpc.v1.retrieveRequest
+import io.grpc.Status
+import io.grpc.StatusException
 import io.kotest.assertions.nondeterministic.eventually
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.inspectors.forAll
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import kotlinx.serialization.json.Json
@@ -44,7 +59,7 @@ private fun JsonObject.items() = getValue("items").jsonArray.map { it.jsonObject
 
 private fun JsonObject.text(name: String) = getValue(name).jsonPrimitive.content
 
-/** Catalog events on Kafka in, search results over HTTP out — through the real composition root. */
+/** Catalog events on Kafka in, search results over HTTP and retrieval over gRPC out — through the real composition root. */
 class SearchFlowTest :
     FunSpec({
         val http = HttpClient.newHttpClient()
@@ -58,10 +73,13 @@ class SearchFlowTest :
             val topics = CatalogTopics(KafkaTestCluster.topic("catalog-dish"), KafkaTestCluster.topic("catalog-restaurant"))
             KafkaTestCluster.createTopics("search-service.dlq")
             val port = freePort()
+            val grpcPort = freePort()
             val config =
                 ServiceConfig(
                     http = HttpServerConfig(port = port),
+                    grpc = GrpcServerConfig(port = grpcPort),
                     elasticsearch = ElasticsearchTestServer.config(),
+                    valkey = ValkeyTestServer.config(),
                     kafka = KafkaConfig(KafkaTestCluster.bootstrapServers),
                     catalogTopics = topics,
                     lifecycle = LifecycleConfig(drainDelay = Duration.ZERO),
@@ -107,6 +125,56 @@ class SearchFlowTest :
                 }
                 eventually(30.seconds) { searchFries("$base/dishes?q=fries&lang=en")!!.text("priceCents") shouldBe "390" }
                 get("$base/dishes?size=50").second.text("total") shouldBe SeedCatalog.dishes.size.toString()
+
+                // Retrieval over gRPC, on the customer's behalf (hashed vectors: no key in tests).
+                val channel = GrpcChannel(GrpcClientConfig(target = "localhost:$grpcPort", deadline = 5.seconds, maxAttempts = 1))
+                try {
+                    val stub = SearchServiceGrpcKt.SearchServiceCoroutineStub(channel.channel)
+                    val token = tokens.accessToken(userId = "craving-1")
+                    val retrieved =
+                        channel.prepare(stub, token).retrieve(
+                            retrieveRequest {
+                                query = "crispy fries"
+                                language = "en"
+                                filters = filters { dietary += "vegetarian" }
+                            },
+                        )
+                    retrieved.semantic shouldBe true
+                    retrieved.dishesList.map { it.dish.slug } shouldContain fries.slug
+                    retrieved.dishesList.forAll { it.dish.dietaryList shouldContain "vegetarian" }
+                    retrieved.dishesList
+                        .first { it.dish.slug == fries.slug }
+                        .dish.name shouldBe "Truffle Fries of Tomorrow"
+
+                    channel
+                        .prepare(stub, token)
+                        .getDishes(
+                            getDishesRequest {
+                                ids += listOf(fries.id, "d-unknown")
+                                language = "de"
+                            },
+                        ).dishesList
+                        .map { it.name } shouldContainExactly listOf("Trüffelpommes von morgen")
+                    channel
+                        .prepare(stub, token)
+                        .describeCatalog(describeCatalogRequest {})
+                        .cuisinesList
+                        .map { it.value } shouldContain
+                        "american"
+
+                    shouldThrow<StatusException> { channel.prepare(stub).describeCatalog(describeCatalogRequest {}) }.status.code shouldBe
+                        Status.Code.UNAUTHENTICATED
+                    shouldThrow<StatusException> {
+                        channel.prepare(stub, token).retrieve(
+                            retrieveRequest {
+                                query = "x"
+                                limit = 50
+                            },
+                        )
+                    }.status.code shouldBe Status.Code.INVALID_ARGUMENT
+                } finally {
+                    channel.stop()
+                }
             } finally {
                 service.lifecycle.stop()
             }

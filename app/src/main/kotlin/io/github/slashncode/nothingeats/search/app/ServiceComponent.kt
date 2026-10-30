@@ -8,6 +8,9 @@ import io.github.slashncode.nothingeats.platform.core.lifecycle.LifecycleManager
 import io.github.slashncode.nothingeats.platform.core.lifecycle.Readiness
 import io.github.slashncode.nothingeats.platform.core.run.CronTask
 import io.github.slashncode.nothingeats.platform.core.run.ServiceRunner
+import io.github.slashncode.nothingeats.platform.grpc.AuthInterceptor
+import io.github.slashncode.nothingeats.platform.grpc.ErrorInterceptor
+import io.github.slashncode.nothingeats.platform.grpc.GrpcServer
 import io.github.slashncode.nothingeats.platform.http.ExceptionReporter
 import io.github.slashncode.nothingeats.platform.http.HttpExtension
 import io.github.slashncode.nothingeats.platform.http.HttpRoutes
@@ -20,22 +23,34 @@ import io.github.slashncode.nothingeats.platform.kafka.KafkaClients
 import io.github.slashncode.nothingeats.platform.posthog.PostHogAnalytics
 import io.github.slashncode.nothingeats.platform.posthog.PostHogExceptionReporter
 import io.github.slashncode.nothingeats.platform.posthog.PostHogHttpExtension
+import io.github.slashncode.nothingeats.platform.valkey.Valkey
 import io.github.slashncode.nothingeats.search.adapters.cron.ReindexTask
 import io.github.slashncode.nothingeats.search.adapters.elasticsearch.ElasticsearchClient
 import io.github.slashncode.nothingeats.search.adapters.elasticsearch.ElasticsearchSearch
 import io.github.slashncode.nothingeats.search.adapters.elasticsearch.SearchIndicesBootstrap
+import io.github.slashncode.nothingeats.search.adapters.embeddings.CachedEmbeddingModel
+import io.github.slashncode.nothingeats.search.adapters.embeddings.EmbeddingProvider
+import io.github.slashncode.nothingeats.search.adapters.embeddings.HashingEmbeddingModel
+import io.github.slashncode.nothingeats.search.adapters.embeddings.OpenAiEmbeddingModel
+import io.github.slashncode.nothingeats.search.adapters.grpc.SearchGrpcService
 import io.github.slashncode.nothingeats.search.adapters.http.SearchRoutes
 import io.github.slashncode.nothingeats.search.adapters.messaging.CatalogEventHandler
 import io.github.slashncode.nothingeats.search.adapters.messaging.KafkaCatalogLog
 import io.github.slashncode.nothingeats.search.application.CatalogLog
+import io.github.slashncode.nothingeats.search.application.DescribeCatalog
 import io.github.slashncode.nothingeats.search.application.DishIndex
+import io.github.slashncode.nothingeats.search.application.DishVectors
+import io.github.slashncode.nothingeats.search.application.EmbeddingModel
 import io.github.slashncode.nothingeats.search.application.EnsureLiveGeneration
+import io.github.slashncode.nothingeats.search.application.GetDishes
 import io.github.slashncode.nothingeats.search.application.ProjectCatalog
 import io.github.slashncode.nothingeats.search.application.Reindex
 import io.github.slashncode.nothingeats.search.application.RestaurantDirectory
+import io.github.slashncode.nothingeats.search.application.RetrieveDishes
 import io.github.slashncode.nothingeats.search.application.SearchDishes
 import io.github.slashncode.nothingeats.search.application.SearchIndices
 import io.github.slashncode.nothingeats.search.application.SuggestDishes
+import io.grpc.BindableService
 import me.tatarka.inject.annotations.Component
 import me.tatarka.inject.annotations.IntoSet
 import me.tatarka.inject.annotations.Provides
@@ -47,7 +62,7 @@ annotation class ServiceScope
 
 /**
  * The composition root: the only place that wires ports to adapters.
- * Lifecycle components, health checks, routes, event handlers and cron tasks are collected with `@IntoSet`.
+ * Lifecycle components, health checks, routes, gRPC services, event handlers and cron tasks are collected with `@IntoSet`.
  * [jwtAuth] is passed in so tests can use test signing keys.
  */
 @ServiceScope
@@ -113,6 +128,44 @@ abstract class ServiceComponent(
     @Provides
     fun httpLifecycle(server: HttpServer): LifecycleComponent = server
 
+    @ServiceScope
+    @Provides
+    fun grpcServer(
+        services: Set<BindableService>,
+        auth: JwtAuth,
+    ): GrpcServer = GrpcServer(config.grpc, services, AuthInterceptor(auth), ErrorInterceptor())
+
+    @IntoSet
+    @Provides
+    fun grpcLifecycle(server: GrpcServer): LifecycleComponent = server
+
+    /** Only the embedding cache uses it, and that fails open: not a readiness check. */
+    @ServiceScope
+    @Provides
+    fun valkey(): Valkey = Valkey(config.valkey)
+
+    @IntoSet
+    @Provides
+    fun valkeyLifecycle(valkey: Valkey): LifecycleComponent = valkey
+
+    // Embeddings
+
+    @ServiceScope
+    @Provides
+    fun embeddingModel(valkey: Valkey): EmbeddingModel =
+        when (config.embeddings.provider) {
+            EmbeddingProvider.HASHING -> HashingEmbeddingModel(config.embeddings.dimensions)
+            EmbeddingProvider.OPENAI ->
+                CachedEmbeddingModel(
+                    OpenAiEmbeddingModel(config.embeddings.model, config.embeddings.dimensions, config.embeddings.openai),
+                    valkey,
+                    config.embeddings.cacheTtl,
+                )
+        }
+
+    @Provides
+    fun dishVectors(model: EmbeddingModel): DishVectors = DishVectors(model)
+
     // Elasticsearch
 
     @ServiceScope
@@ -126,7 +179,7 @@ abstract class ServiceComponent(
     @ServiceScope
     @Provides
     fun elasticsearchSearch(client: ElasticsearchClient): ElasticsearchSearch =
-        ElasticsearchSearch(client, indexPrefix = config.elasticsearch.indexPrefix)
+        ElasticsearchSearch(client, indexPrefix = config.elasticsearch.indexPrefix, vectorDimensions = config.embeddings.dimensions)
 
     @Provides
     fun searchIndices(search: ElasticsearchSearch): SearchIndices = search
@@ -144,7 +197,10 @@ abstract class ServiceComponent(
     // Catalog projection
 
     @Provides
-    fun projectCatalog(indices: SearchIndices): ProjectCatalog = ProjectCatalog(indices)
+    fun projectCatalog(
+        indices: SearchIndices,
+        vectors: DishVectors,
+    ): ProjectCatalog = ProjectCatalog(indices, vectors)
 
     @IntoSet
     @Provides
@@ -182,7 +238,8 @@ abstract class ServiceComponent(
     fun reindex(
         indices: SearchIndices,
         log: CatalogLog,
-    ): CronTask = ReindexTask(Reindex(indices, log))
+        vectors: DishVectors,
+    ): CronTask = ReindexTask(Reindex(indices, log, vectors))
 
     // Search
 
@@ -202,4 +259,19 @@ abstract class ServiceComponent(
         search: SearchDishes,
         suggest: SuggestDishes,
     ): HttpRoutes = SearchRoutes(search, suggest)
+
+    // Retrieval for the Craving Coach (gRPC)
+
+    @IntoSet
+    @Provides
+    fun searchGrpc(
+        index: DishIndex,
+        restaurants: RestaurantDirectory,
+        embeddings: EmbeddingModel,
+    ): BindableService =
+        SearchGrpcService(
+            RetrieveDishes(index, restaurants, embeddings),
+            GetDishes(index, restaurants),
+            DescribeCatalog(index),
+        )
 }

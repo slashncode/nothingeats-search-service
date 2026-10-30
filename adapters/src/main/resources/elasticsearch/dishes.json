@@ -145,7 +145,8 @@
       "spiceLevel": { "type": "integer" },
       "calories": { "type": "integer" },
       "moods": { "type": "keyword", "fields": { "de": { "type": "text", "analyzer": "german_text", "search_analyzer": "german_query" }, "en": { "type": "text", "analyzer": "english_text", "search_analyzer": "english_query" } } },
-      "available": { "type": "boolean" }
+      "available": { "type": "boolean" },
+      "embeddingModel": { "type": "keyword" }
     }
   }
 }

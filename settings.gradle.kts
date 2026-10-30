@@ -61,4 +61,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "nothingeats-search-service"
 
-include("domain", "application", "adapters", "app")
+include("grpc-api", "domain", "application", "adapters", "app")

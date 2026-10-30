@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package nothingeats.search.v1;
+
+option java_multiple_files = true;
+option java_package = "io.github.slashncode.nothingeats.search.grpc.v1";
+
+// Retrieval over the catalog for the Craving Coach (assistant-service, TypeScript): a hybrid search
+// (BM25 and kNN on dish embeddings, fused by weighted reciprocal rank), dishes by id, and the
+// vocabulary a model may filter by. Callers forward the customer's access token in `authorization`.
+// Invalid requests fail with INVALID_ARGUMENT and google.rpc.ErrorInfo reason SEARCH_INVALID.
+service SearchService {
+  // The dishes that fit a craving best. Unavailable dishes never come back.
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
+
+  // Dishes by id, in the order asked; unknown ids are left out.
+  rpc GetDishes(GetDishesRequest) returns (GetDishesResponse);
+
+  // Every cuisine, diet tag, mood and allergen the available dishes use right now, with counts.
+  rpc DescribeCatalog(DescribeCatalogRequest) returns (DescribeCatalogResponse);
+}
+
+// Filters combine with AND; inside one filter, values combine as noted.
+message Filters {
+  // Any of these cuisines.
+  repeated string cuisines = 1;
+  // All of these diet tags, e.g. vegan and gluten_free.
+  repeated string dietary = 2;
+  // None of these allergens.
+  repeated string exclude_allergens = 3;
+  // Any of these moods.
+  repeated string moods = 4;
+  // 0 (mild) to 3 (fiery).
+  optional int32 max_spice_level = 5;
+  optional int64 max_price_cents = 6;
+  // Only restaurants open right now, in Berlin time.
+  bool open_now = 7;
+}
+
+message RetrieveRequest {
+  // The craving in words, as the customer said it or rewritten. Empty means filters only.
+  string query = 1;
+  // "de" or "en": the analyzers for the keyword leg and the language of the returned texts.
+  string language = 2;
+  // Words that must weigh in the keyword leg, e.g. dish names the model inferred.
+  repeated string keywords = 3;
+  // Words no returned dish may mention in its name, section or description ("no mushrooms").
+  repeated string negative_keywords = 4;
+  Filters filters = 5;
+  // How to fuse the two legs: 0 is keywords only, 1 is meaning only. Unset: the service's default.
+  optional double semantic_weight = 6;
+  // 1 to 20. Unset: 8.
+  optional int32 limit = 7;
+}
+
+message Dish {
+  string id = 1;
+  string restaurant_id = 2;
+  string restaurant_slug = 3;
+  string restaurant_name = 4;
+  string cuisine = 5;
+  string slug = 6;
+  // Name, description and menu section in the requested language.
+  string name = 7;
+  string description = 8;
+  string section = 9;
+  int64 price_cents = 10;
+  repeated string dietary = 11;
+  repeated string allergens = 12;
+  int32 spice_level = 13;
+  int32 calories = 14;
+  repeated string moods = 15;
+  bool available = 16;
+  // Whether the restaurant is open right now, in Berlin time.
+  bool open_now = 17;
+}
+
+message RetrievedDish {
+  Dish dish = 1;
+  // The fused score; only the order it gives means something.
+  double score = 2;
+  // 1-based rank in the keyword leg and in the meaning leg; 0 means not found there.
+  int32 lexical_rank = 3;
+  int32 semantic_rank = 4;
+}
+
+message RetrieveResponse {
+  repeated RetrievedDish dishes = 1;
+  // False when only keywords were used: an empty query, or the embedding model was unavailable.
+  bool semantic = 2;
+}
+
+message GetDishesRequest {
+  // At most 20.
+  repeated string ids = 1;
+  // "de" or "en".
+  string language = 2;
+}
+
+message GetDishesResponse {
+  repeated Dish dishes = 1;
+}
+
+message DescribeCatalogRequest {}
+
+message VocabularyValue {
+  string value = 1;
+  // How many available dishes carry it.
+  int64 dishes = 2;
+}
+
+message DescribeCatalogResponse {
+  repeated VocabularyValue cuisines = 1;
+  repeated VocabularyValue dietary = 2;
+  repeated VocabularyValue moods = 3;
+  repeated VocabularyValue allergens = 4;
+}

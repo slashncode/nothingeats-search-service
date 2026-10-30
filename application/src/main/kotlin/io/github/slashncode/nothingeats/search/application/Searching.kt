@@ -32,18 +32,8 @@ class SearchDishes(
         page: Int,
         size: Int,
     ): DishResults {
-        val query = validated { DishQuery(text.trim(), language, filters, page, size) }
-        val open =
-            if (filters.openNow) {
-                val now = LocalTime.now(clock.withZone(BERLIN))
-                restaurants
-                    .all()
-                    .filter { it.isOpenAt(now) }
-                    .map { it.id }
-                    .toSet()
-            } else {
-                null
-            }
+        val query = validQuery { DishQuery(text.trim(), language, filters, page, size) }
+        val open = if (filters.openNow) restaurants.openAt(clock) else null
         val results = index.search(query, open)
         analytics.capture(
             "search_performed",
@@ -68,10 +58,14 @@ class SearchDishes(
             "price".takeIf { maxPriceCents != null },
             "open_now".takeIf { openNow },
         )
+}
 
-    private companion object {
-        val BERLIN: ZoneId = ZoneId.of("Europe/Berlin")
-    }
+internal val BERLIN: ZoneId = ZoneId.of("Europe/Berlin")
+
+/** The ids of the restaurants open right now, in Berlin time (opening hours may run past midnight). */
+internal suspend fun RestaurantDirectory.openAt(clock: Clock): Set<String> {
+    val now = LocalTime.now(clock.withZone(BERLIN))
+    return all().filter { it.isOpenAt(now) }.map { it.id }.toSet()
 }
 
 /** Search-as-you-type over dish and restaurant names. */
@@ -94,14 +88,16 @@ class SuggestDishes(
     }
 }
 
-private inline fun <T> validated(build: () -> T): T =
+/** Builds a query, turning the domain's [InvalidQuery] into the error every transport reports as 422 or INVALID_ARGUMENT. */
+inline fun <T> validQuery(build: () -> T): T =
     try {
         build()
     } catch (e: InvalidQuery) {
         throw invalid(e.field, e.message ?: "invalid")
     }
 
-private fun invalid(
+@PublishedApi
+internal fun invalid(
     field: String,
     reason: String,
 ) = AppError.Invalid(ErrorCode("SEARCH_INVALID"), "The search is invalid", listOf(Violation(field, reason)))

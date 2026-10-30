@@ -1,8 +1,10 @@
 package io.github.slashncode.nothingeats.search.application
 
+import io.github.slashncode.nothingeats.search.domain.CatalogVocabulary
 import io.github.slashncode.nothingeats.search.domain.DishQuery
 import io.github.slashncode.nothingeats.search.domain.DishResults
 import io.github.slashncode.nothingeats.search.domain.Language
+import io.github.slashncode.nothingeats.search.domain.Retrieval
 import io.github.slashncode.nothingeats.search.domain.SearchableDish
 import io.github.slashncode.nothingeats.search.domain.SearchableRestaurant
 import io.github.slashncode.nothingeats.search.domain.Suggestion
@@ -37,10 +39,15 @@ interface SearchIndices {
 
     suspend fun create(): Generation
 
-    /** Writes into [into], or into the live generation; older versions than stored are dropped. */
+    /**
+     * Writes into [into], or into the live generation; older versions than stored are dropped.
+     * [vector] goes with a dish; an index that cannot take it (older mapping, other dimensions)
+     * gets the dish without it.
+     */
     suspend fun write(
         event: CatalogEvent,
         into: Generation? = null,
+        vector: DishVector? = null,
     )
 
     /** Makes [generation] live in one atomic step; returns the one it replaced. */
@@ -75,7 +82,28 @@ interface DishIndex {
         language: Language,
         limit: Int,
     ): List<Suggestion>
+
+    /**
+     * Both legs of a hybrid retrieval, each ranked on its own, at most [candidates] each. Without
+     * [vector] there is no meaning leg; when the index cannot run it, [Candidates.semantic] is null.
+     */
+    suspend fun retrieve(
+        retrieval: Retrieval,
+        vector: DishVector?,
+        openRestaurantIds: Set<String>?,
+        candidates: Int,
+    ): Candidates
+
+    /** Dishes by id, in the order of [ids]; unknown ids are left out. */
+    suspend fun get(ids: List<String>): List<SearchableDish>
+
+    suspend fun vocabulary(): CatalogVocabulary
 }
+
+data class Candidates(
+    val lexical: List<SearchableDish>,
+    val semantic: List<SearchableDish>?,
+)
 
 interface RestaurantDirectory {
     suspend fun all(): List<SearchableRestaurant>

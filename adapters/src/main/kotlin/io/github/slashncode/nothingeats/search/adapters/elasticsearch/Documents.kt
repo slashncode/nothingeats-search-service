@@ -1,5 +1,6 @@
 package io.github.slashncode.nothingeats.search.adapters.elasticsearch
 
+import io.github.slashncode.nothingeats.search.application.DishVector
 import io.github.slashncode.nothingeats.search.domain.SearchableDish
 import io.github.slashncode.nothingeats.search.domain.SearchableRestaurant
 import io.github.slashncode.nothingeats.search.domain.Text
@@ -31,6 +32,10 @@ internal data class DishDocument(
     val calories: Int,
     val moods: List<String>,
     val available: Boolean,
+    /** The dish's embedding (never read back: searches exclude it from `_source`). */
+    val embedding: List<Float>? = null,
+    /** The vector space of [embedding]; the meaning leg only compares vectors of its own model. */
+    val embeddingModel: String? = null,
 )
 
 @Serializable
@@ -47,7 +52,7 @@ private fun Text.document() = TextDocument(de, en)
 
 private fun TextDocument.text() = Text(de, en)
 
-internal fun SearchableDish.document() =
+internal fun SearchableDish.document(vector: DishVector? = null) =
     DishDocument(
         id = id,
         restaurantId = restaurantId,
@@ -65,6 +70,8 @@ internal fun SearchableDish.document() =
         calories = calories,
         moods = moods.sorted(),
         available = available,
+        embedding = vector?.values?.toList(),
+        embeddingModel = vector?.model,
     )
 
 internal fun DishDocument.dish() =

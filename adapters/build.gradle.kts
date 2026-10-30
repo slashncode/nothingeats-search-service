@@ -1,4 +1,5 @@
-// HTTP routes, Elasticsearch and Kafka live here, behind the application's ports. No database: search is a read model.
+// HTTP and gRPC, Elasticsearch, Kafka, Valkey and the embedding models live here, behind the
+// application's ports. No database: search is a read model.
 plugins {
     id("nothingeats.kotlin-base")
     id("nothingeats.kotlinx-serialization")
@@ -11,6 +12,9 @@ dependencies {
     api(libs.nothingeats.platform.http)
     api(libs.nothingeats.ktor.posthog)
     api(libs.nothingeats.platform.kafka)
+    api(libs.nothingeats.platform.valkey)
+    api(libs.nothingeats.platform.grpc)
+    api(project(":grpc-api"))
 
     // Elasticsearch in a container and the catalog seed as events, shared with the app tests.
     testFixturesApi(libs.nothingeats.platform.testing)

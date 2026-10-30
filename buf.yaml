@@ -1,0 +1,10 @@
+# The gRPC contract of this service (record 032): buf lint and buf breaking run in CI.
+version: v2
+modules:
+  - path: grpc-api/src/main/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

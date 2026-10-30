@@ -2,11 +2,12 @@ package io.github.slashncode.nothingeats.search.application
 
 import org.slf4j.LoggerFactory
 
-/** The live projection: every catalog change goes into the live generation. */
+/** The live projection: every catalog change goes into the live generation, dishes with their vector. */
 class ProjectCatalog(
     private val indices: SearchIndices,
+    private val vectors: DishVectors,
 ) {
-    suspend operator fun invoke(event: CatalogEvent) = indices.write(event)
+    suspend operator fun invoke(event: CatalogEvent) = indices.write(event, vector = vectors.of(event))
 }
 
 data class ReindexResult(
@@ -26,6 +27,7 @@ data class ReindexResult(
 class Reindex(
     private val indices: SearchIndices,
     private val log: CatalogLog,
+    private val vectors: DishVectors,
 ) {
     private val logger = LoggerFactory.getLogger(Reindex::class.java)
 
@@ -34,12 +36,12 @@ class Reindex(
         var events = 0
         val end =
             log.replay { event ->
-                indices.write(event, into = generation)
+                indices.write(event, into = generation, vector = vectors.of(event))
                 events++
             }
         val replaced = indices.publish(generation)
         log.catchUp(end) { event ->
-            indices.write(event, into = generation)
+            indices.write(event, into = generation, vector = vectors.of(event))
             events++
         }
         replaced?.let { indices.drop(it) }

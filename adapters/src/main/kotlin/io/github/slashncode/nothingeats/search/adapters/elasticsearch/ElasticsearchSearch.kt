@@ -174,7 +174,7 @@ class ElasticsearchSearch(
                 withoutVectors()
                 putJsonObject("query") {
                     putJsonObject("bool") {
-                        put("must", textQuery(query.text, query.language))
+                        put("must", textQuery(query.text, query.language, prefixes = true))
                         // Hard filters, not facets: they narrow what the facets count, too.
                         putJsonArray("filter") {
                             if (openRestaurantIds != null) add(terms("restaurantId", openRestaurantIds))
@@ -290,6 +290,7 @@ class ElasticsearchSearch(
         language: Language,
         keywords: List<String> = emptyList(),
         minimumShouldMatch: String? = null,
+        prefixes: Boolean = false,
     ): JsonObject {
         if (text.isBlank() && keywords.all { it.isBlank() }) return buildJsonObject { putJsonObject("match_all") {} }
         val lang = language.tag
@@ -306,7 +307,7 @@ class ElasticsearchSearch(
                                 add("section.$lang^1.5")
                                 add("description.$lang")
                             }
-                            put("fuzziness", "AUTO")
+                            put("fuzziness", FUZZINESS)
                             put("prefix_length", 1)
                             minimumShouldMatch?.let { put("minimum_should_match", it) }
                         }
@@ -323,6 +324,26 @@ class ElasticsearchSearch(
                             put("boost", TAG_BOOST)
                         }
                     }
+                    // A word start finds the whole word ("burg" → Burger, "Trüff" → Trüffelpommes): the
+                    // last word as a prefix, the others whole, all in the same name. People type word
+                    // starts into a search box; the coach's model writes whole words, so it goes without.
+                    if (prefixes) {
+                        addJsonObject {
+                            putJsonObject("multi_match") {
+                                put("query", text)
+                                put("type", "bool_prefix")
+                                put("operator", "and")
+                                putJsonArray("fields") {
+                                    listOf("name.$lang.suggest", "restaurantName.suggest").forEach { field ->
+                                        add(field)
+                                        add("$field._2gram")
+                                        add("$field._3gram")
+                                    }
+                                }
+                                put("boost", PREFIX_BOOST)
+                            }
+                        }
+                    }
                     // The model's own words for the craving: dish names, ingredients.
                     keywords.filter { it.isNotBlank() }.forEach { keyword ->
                         addJsonObject {
@@ -334,7 +355,7 @@ class ElasticsearchSearch(
                                     add("section.$lang^1.5")
                                     add("description.$lang")
                                 }
-                                put("fuzziness", "AUTO")
+                                put("fuzziness", FUZZINESS)
                                 put("prefix_length", 1)
                                 put("boost", KEYWORD_BOOST)
                             }
@@ -636,6 +657,11 @@ class ElasticsearchSearch(
         private const val NOT_FOUND = 404
         private const val CONFLICT = 409
         private const val KEYWORD_BOOST = 1.5
+        private const val PREFIX_BOOST = 2.0
+
+        // No typos below five letters (there a word is more likely unfinished, and one edit reaches
+        // too much: "marg" → "Magen"), one up to seven, two from eight.
+        private const val FUZZINESS = "AUTO:5,8"
         private const val RETRIEVAL_MINIMUM_SHOULD_MATCH = "2<60%"
         private const val KNN_NUM_CANDIDATES = 100
         private const val MAX_LOGGED_ERROR = 300

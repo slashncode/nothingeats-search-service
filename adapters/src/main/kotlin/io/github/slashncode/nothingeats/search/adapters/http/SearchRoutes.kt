@@ -44,6 +44,20 @@ data class DishHitResponse(
     val moods: List<String>,
     val available: Boolean,
     val restaurant: DishRestaurantResponse,
+    /** Null: the shop draws its illustration. */
+    val image: DishImageResponse? = null,
+)
+
+@Serializable
+data class DishImageResponse(
+    val url: String,
+    val cardUrl: String,
+    val wideUrl: String,
+    val alt: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val focalX: Double? = null,
+    val focalY: Double? = null,
 )
 
 @Serializable
@@ -174,6 +188,19 @@ class SearchRoutes(
             moods = moods.sorted(),
             available = available,
             restaurant = DishRestaurantResponse(restaurantSlug, restaurantName, cuisine),
+            image =
+                image?.let {
+                    DishImageResponse(
+                        it.url,
+                        it.cardUrl,
+                        it.wideUrl,
+                        it.alt.of(language),
+                        it.width,
+                        it.height,
+                        it.focalX,
+                        it.focalY,
+                    )
+                },
         )
 
     private fun FacetValue.toResponse() = FacetValueResponse(value, count)

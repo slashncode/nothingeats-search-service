@@ -57,6 +57,22 @@ data class SearchableDish(
     val calories: Int,
     val moods: Set<String>,
     val available: Boolean,
+    /** Shown on result cards, never searched; null: the shop draws its illustration. */
+    val image: DishImage? = null,
+    /** Left the shop (by itself or with its restaurant): never found. */
+    val archived: Boolean = false,
+)
+
+/** An uploaded photo: public paths and alt texts. */
+data class DishImage(
+    val url: String,
+    val cardUrl: String,
+    val wideUrl: String,
+    val alt: Text,
+    val width: Int? = null,
+    val height: Int? = null,
+    val focalX: Double? = null,
+    val focalY: Double? = null,
 )
 
 /** What search needs of a restaurant: enough for "open now". */
@@ -67,6 +83,7 @@ data class SearchableRestaurant(
     val cuisine: String,
     val opensAt: LocalTime,
     val closesAt: LocalTime,
+    val archived: Boolean = false,
 ) {
     /** Handles opening hours that run past midnight (e.g. 18:00–02:00), like the catalog. */
     fun isOpenAt(time: LocalTime): Boolean =

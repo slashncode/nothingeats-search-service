@@ -5,9 +5,12 @@ import io.github.slashncode.nothingeats.search.adapters.SeedCatalog
 import io.github.slashncode.nothingeats.search.application.CatalogEvent
 import io.github.slashncode.nothingeats.search.application.EnsureLiveGeneration
 import io.github.slashncode.nothingeats.search.domain.DishFilters
+import io.github.slashncode.nothingeats.search.domain.DishImage
 import io.github.slashncode.nothingeats.search.domain.DishQuery
 import io.github.slashncode.nothingeats.search.domain.Language
+import io.github.slashncode.nothingeats.search.domain.Retrieval
 import io.github.slashncode.nothingeats.search.domain.SuggestionKind
+import io.github.slashncode.nothingeats.search.domain.Text
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.inspectors.forAll
 import io.kotest.matchers.collections.shouldContain
@@ -119,6 +122,30 @@ class ElasticsearchSearchTest :
                 it.spiceLevel shouldBe 0
             }
             results.facets.price.map { it.value } shouldBe listOf("800", "1200", "1500", "2000")
+        }
+
+        test("an archived dish is found nowhere, and comes back when it returns; photos come with the hits") {
+            val search = seeded()
+            val dish = SeedCatalog.dishes.first()
+            val photo = DishImage("/media/7/d.webp", "/media/7/d-640x400.webp", "/media/7/d-1280x640.webp", Text("Foto", "Photo"))
+
+            search.write(CatalogEvent.DishPublished(dish.copy(archived = true), version = 2_000))
+            search.refresh()
+            search.search(DishQuery(dish.name.de, Language.DE), null).dishes.map { it.id } shouldNotContain dish.id
+            search.suggest(dish.name.de.take(6), Language.DE, 8).map { it.target } shouldNotContain dish.id
+            search.get(listOf(dish.id)) shouldBe emptyList()
+            search
+                .retrieve(Retrieval(dish.name.de, Language.DE), vector = null, openRestaurantIds = null, candidates = 50)
+                .lexical
+                .map { it.id } shouldNotContain dish.id
+
+            search.write(CatalogEvent.DishPublished(dish.copy(image = photo), version = 2_001))
+            search.refresh()
+            search
+                .search(DishQuery(dish.name.de, Language.DE), null)
+                .dishes
+                .first { it.id == dish.id }
+                .image shouldBe photo
         }
 
         test("open now restricts to the given restaurants") {

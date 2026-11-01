@@ -11,7 +11,8 @@
       "name": { "type": "keyword" },
       "cuisine": { "type": "keyword" },
       "opensAt": { "type": "keyword" },
-      "closesAt": { "type": "keyword" }
+      "closesAt": { "type": "keyword" },
+      "archived": { "type": "boolean" }
     }
   }
 }

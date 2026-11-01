@@ -157,7 +157,12 @@ class ElasticsearchSearch(
     }
 
     override suspend fun all(): List<SearchableRestaurant> {
-        val response = client.request("POST", "/$restaurantAlias/_search", """{"size": $MAX_RESTAURANTS, "query": {"match_all": {}}}""")
+        val response =
+            client.request(
+                "POST",
+                "/$restaurantAlias/_search",
+                """{"size": $MAX_RESTAURANTS, "query": {"bool": {"must_not": {"term": {"archived": true}}}}}""",
+            )
         return hits(response.body!!).map { json.decodeFromJsonElement(RestaurantDocument.serializer(), it).restaurant() }
     }
 
@@ -180,6 +185,7 @@ class ElasticsearchSearch(
                             if (openRestaurantIds != null) add(terms("restaurantId", openRestaurantIds))
                         }
                         putJsonArray("must_not") {
+                            add(ARCHIVED)
                             if (query.filters.excludeAllergens.isNotEmpty()) add(terms("allergens", query.filters.excludeAllergens))
                         }
                     }
@@ -269,14 +275,19 @@ class ElasticsearchSearch(
         put("size", limit)
         withoutVectors()
         putJsonObject("query") {
-            putJsonObject("multi_match") {
-                put("query", prefix)
-                put("type", "bool_prefix")
-                putJsonArray("fields") {
-                    add(field)
-                    add("$field._2gram")
-                    add("$field._3gram")
+            putJsonObject("bool") {
+                putJsonObject("must") {
+                    putJsonObject("multi_match") {
+                        put("query", prefix)
+                        put("type", "bool_prefix")
+                        putJsonArray("fields") {
+                            add(field)
+                            add("$field._2gram")
+                            add("$field._3gram")
+                        }
+                    }
                 }
+                put("must_not", ARCHIVED)
             }
         }
         collapse?.let { putJsonObject("collapse") { put("field", it) } }
@@ -385,6 +396,7 @@ class ElasticsearchSearch(
                 )
         val exclusions =
             listOfNotNull(
+                ARCHIVED,
                 retrieval.filters.excludeAllergens
                     .takeIf { it.isNotEmpty() }
                     ?.let { terms("allergens", it) },
@@ -477,6 +489,7 @@ class ElasticsearchSearch(
                 .map { it.jsonObject }
                 .filter { it["found"]?.jsonPrimitive?.content == "true" }
                 .map { json.decodeFromJsonElement(DishDocument.serializer(), it.getValue("_source")).dish() }
+                .filterNot { it.archived }
                 .associateBy { it.id }
         return ids.mapNotNull { found[it] }
     }
@@ -485,7 +498,12 @@ class ElasticsearchSearch(
         val body =
             buildJsonObject {
                 put("size", 0)
-                putJsonObject("query") { putJsonObject("bool") { putJsonArray("filter") { add(term("available", true)) } } }
+                putJsonObject("query") {
+                    putJsonObject("bool") {
+                        putJsonArray("filter") { add(term("available", true)) }
+                        put("must_not", ARCHIVED)
+                    }
+                }
                 putJsonObject("aggs") {
                     listOf("cuisine", "dietary", "moods", "allergens").forEach { field ->
                         putJsonObject(field) {
@@ -652,7 +670,10 @@ class ElasticsearchSearch(
 
     companion object {
         /** Bump with every change to `resources/elasticsearch/` or the vector field, then run `cron reindex`. */
-        const val MAPPING_VERSION = 4
+        const val MAPPING_VERSION = 5
+
+        /** Archived dishes and restaurants have left the shop; no query finds them. */
+        private val ARCHIVED = buildJsonObject { putJsonObject("term") { put("archived", true) } }
 
         /** Matches the embedding model's default (`EMBEDDINGS__DIMENSIONS`). */
         const val DEFAULT_VECTOR_DIMENSIONS = 1024

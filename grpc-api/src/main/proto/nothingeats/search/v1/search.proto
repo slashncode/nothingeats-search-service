@@ -73,6 +73,16 @@ message Dish {
   bool available = 16;
   // Whether the restaurant is open right now, in Berlin time.
   bool open_now = 17;
+  // The dish's photo; unset when it has none (the shop draws an illustration).
+  optional DishImage image = 18;
+}
+
+// An uploaded photo: paths on the shop's origin (/media/...), alt text in the requested language.
+message DishImage {
+  string url = 1;
+  string card_url = 2;
+  string wide_url = 3;
+  string alt = 4;
 }
 
 message RetrievedDish {

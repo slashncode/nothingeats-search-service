@@ -21,6 +21,7 @@ import io.github.slashncode.nothingeats.search.grpc.v1.SearchServiceGrpcKt
 import io.github.slashncode.nothingeats.search.grpc.v1.VocabularyValue
 import io.github.slashncode.nothingeats.search.grpc.v1.describeCatalogResponse
 import io.github.slashncode.nothingeats.search.grpc.v1.dish
+import io.github.slashncode.nothingeats.search.grpc.v1.dishImage
 import io.github.slashncode.nothingeats.search.grpc.v1.getDishesResponse
 import io.github.slashncode.nothingeats.search.grpc.v1.retrieveResponse
 import io.github.slashncode.nothingeats.search.grpc.v1.retrievedDish
@@ -117,6 +118,15 @@ class SearchGrpcService(
             moods += source.moods.sorted()
             available = source.available
             openNow = open
+            source.image?.let { photo ->
+                image =
+                    dishImage {
+                        url = photo.url
+                        cardUrl = photo.cardUrl
+                        wideUrl = photo.wideUrl
+                        alt = photo.alt.of(language)
+                    }
+            }
         }
     }
 

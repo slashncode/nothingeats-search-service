@@ -2,6 +2,7 @@ package io.github.slashncode.nothingeats.search.adapters.messaging
 
 import io.github.slashncode.nothingeats.platform.kafka.CloudEvent
 import io.github.slashncode.nothingeats.search.application.CatalogEvent
+import io.github.slashncode.nothingeats.search.domain.DishImage
 import io.github.slashncode.nothingeats.search.domain.SearchableDish
 import io.github.slashncode.nothingeats.search.domain.SearchableRestaurant
 import io.github.slashncode.nothingeats.search.domain.Text
@@ -25,6 +26,18 @@ internal data class TextV1(
 )
 
 @Serializable
+internal data class ImageV1(
+    val url: String,
+    val cardUrl: String,
+    val wideUrl: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val focalX: Double? = null,
+    val focalY: Double? = null,
+    val alt: TextV1,
+)
+
+@Serializable
 internal data class RestaurantPublishedV1(
     val restaurantId: String,
     val slug: String,
@@ -32,6 +45,7 @@ internal data class RestaurantPublishedV1(
     val cuisine: String,
     val opensAt: String,
     val closesAt: String,
+    val archived: Boolean = false,
 )
 
 @Serializable
@@ -52,6 +66,8 @@ internal data class DishPublishedV1(
     val calories: Int,
     val moods: List<String> = emptyList(),
     val available: Boolean = true,
+    val image: ImageV1? = null,
+    val archived: Boolean = false,
 )
 
 private const val RESTAURANT_PUBLISHED = "nothingeats.catalog.restaurant.published.v1"
@@ -82,6 +98,20 @@ internal fun CloudEvent.toCatalogEvent(offset: Long): CatalogEvent? =
                     calories = dish.calories,
                     moods = dish.moods.toSet(),
                     available = dish.available,
+                    image =
+                        dish.image?.let {
+                            DishImage(
+                                it.url,
+                                it.cardUrl,
+                                it.wideUrl,
+                                it.alt.text(),
+                                it.width,
+                                it.height,
+                                it.focalX,
+                                it.focalY,
+                            )
+                        },
+                    archived = dish.archived,
                 ),
                 version = offset,
             )
@@ -96,6 +126,7 @@ internal fun CloudEvent.toCatalogEvent(offset: Long): CatalogEvent? =
                     cuisine = restaurant.cuisine,
                     opensAt = LocalTime.parse(restaurant.opensAt),
                     closesAt = LocalTime.parse(restaurant.closesAt),
+                    archived = restaurant.archived,
                 ),
                 version = offset,
             )

@@ -1,6 +1,7 @@
 package io.github.slashncode.nothingeats.search.adapters.elasticsearch
 
 import io.github.slashncode.nothingeats.search.application.DishVector
+import io.github.slashncode.nothingeats.search.domain.DishImage
 import io.github.slashncode.nothingeats.search.domain.SearchableDish
 import io.github.slashncode.nothingeats.search.domain.SearchableRestaurant
 import io.github.slashncode.nothingeats.search.domain.Text
@@ -11,6 +12,18 @@ import java.time.LocalTime
 internal data class TextDocument(
     val de: String,
     val en: String,
+)
+
+@Serializable
+internal data class ImageDocument(
+    val url: String,
+    val cardUrl: String,
+    val wideUrl: String,
+    val alt: TextDocument,
+    val width: Int? = null,
+    val height: Int? = null,
+    val focalX: Double? = null,
+    val focalY: Double? = null,
 )
 
 /** What a dish looks like in the `dishes` index (mapping: resources/elasticsearch/dishes.json). */
@@ -36,6 +49,10 @@ internal data class DishDocument(
     val embedding: List<Float>? = null,
     /** The vector space of [embedding]; the meaning leg only compares vectors of its own model. */
     val embeddingModel: String? = null,
+    /** Stored, not indexed. */
+    val image: ImageDocument? = null,
+    /** Only written when true, so documents fit generations from before the field. */
+    val archived: Boolean? = null,
 )
 
 @Serializable
@@ -46,6 +63,7 @@ internal data class RestaurantDocument(
     val cuisine: String,
     val opensAt: String,
     val closesAt: String,
+    val archived: Boolean? = null,
 )
 
 private fun Text.document() = TextDocument(de, en)
@@ -72,6 +90,8 @@ internal fun SearchableDish.document(vector: DishVector? = null) =
         available = available,
         embedding = vector?.values?.toList(),
         embeddingModel = vector?.model,
+        image = image?.let { ImageDocument(it.url, it.cardUrl, it.wideUrl, it.alt.document(), it.width, it.height, it.focalX, it.focalY) },
+        archived = archived.takeIf { it },
     )
 
 internal fun DishDocument.dish() =
@@ -92,9 +112,12 @@ internal fun DishDocument.dish() =
         calories = calories,
         moods = moods.toSet(),
         available = available,
+        image = image?.let { DishImage(it.url, it.cardUrl, it.wideUrl, it.alt.text(), it.width, it.height, it.focalX, it.focalY) },
+        archived = archived == true,
     )
 
-internal fun SearchableRestaurant.document() = RestaurantDocument(id, slug, name, cuisine, opensAt.toString(), closesAt.toString())
+internal fun SearchableRestaurant.document() =
+    RestaurantDocument(id, slug, name, cuisine, opensAt.toString(), closesAt.toString(), archived.takeIf { it })
 
 internal fun RestaurantDocument.restaurant() =
-    SearchableRestaurant(id, slug, name, cuisine, LocalTime.parse(opensAt), LocalTime.parse(closesAt))
+    SearchableRestaurant(id, slug, name, cuisine, LocalTime.parse(opensAt), LocalTime.parse(closesAt), archived == true)

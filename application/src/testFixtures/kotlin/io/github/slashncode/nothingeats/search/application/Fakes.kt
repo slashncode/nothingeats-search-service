@@ -14,6 +14,8 @@ import io.github.slashncode.nothingeats.search.domain.Text
 import java.time.LocalTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration
 
 /** Generations as maps of documents, with external versioning like Elasticsearch's. */
 class InMemorySearchIndices : SearchIndices {
@@ -56,6 +58,12 @@ class InMemorySearchIndices : SearchIndices {
     override suspend fun drop(generation: Generation) {
         generations.remove(generation.name)
     }
+
+    override suspend fun count() =
+        liveName?.let { name ->
+            val ids = generations.getValue(name).keys
+            IndexCounts(ids.count { it.startsWith("dish:") }.toLong(), ids.count { it.startsWith("restaurant:") }.toLong())
+        } ?: IndexCounts(0, 0)
 
     fun documents(generation: String? = liveName) = generations.getValue(generation!!).keys.sorted()
 }
@@ -177,3 +185,24 @@ fun dish(
 )
 
 val noFilters = DishFilters()
+
+/** Claims like Valkey's `SET NX`, without the timeout. */
+class InMemoryReindexRuns : ReindexRuns {
+    val claimed = AtomicReference<ReindexRun?>(null)
+
+    @Volatile var finished: ReindexRun? = null
+
+    override suspend fun claim(
+        run: ReindexRun,
+        timeout: Duration,
+    ) = claimed.compareAndSet(null, run)
+
+    override suspend fun finish(run: ReindexRun) {
+        finished = run
+        claimed.updateAndGet { if (it?.id == run.id) null else it }
+    }
+
+    override suspend fun running() = claimed.get()
+
+    override suspend fun last() = finished
+}

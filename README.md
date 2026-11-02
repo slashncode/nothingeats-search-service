@@ -18,6 +18,8 @@ Search is a **read model**: it owns no data and has no database. Everything in E
 - Errors are RFC 9457 problems; invalid parameters are `422 SEARCH_INVALID` with the field.
 - Every search is captured as the PostHog event `search_performed` (normalised query, language, result count, filters used, page) with the visitor's distinct id from the request headers, including zero-result searches.
 
+Role `admin` (the backoffice): `GET /admin/index` (live generation, documents behind the aliases, the running and the last reindex) and `POST /admin/reindex` (202 with the run; it goes on in the background).
+
 ## Retrieval for the Craving Coach (gRPC, `nothingeats.search.v1.SearchService`)
 
 The contract lives in `grpc-api/src/main/proto` (buf lint and buf breaking in CI); the assistant (TypeScript) generates its client from it. Every call carries the customer's access token, forwarded by the assistant.
@@ -36,7 +38,7 @@ The contract lives in `grpc-api/src/main/proto` (buf lint and buf breaking in CI
 
 - **Generations**: each index build creates `dishes-v<mapping>-<millis>` and `restaurants-v<mapping>-<millis>`; readers and the live projection only use the aliases `dishes` and `restaurants`.
 - **Live projection**: the `search-service` consumer group reads `catalog.dish.v1` and `catalog.restaurant.v1`. There is no inbox table: every document is written with the Kafka offset as its external version, so redeliveries and stale writes are rejected by Elasticsearch itself (409 is success).
-- **Reindex** (`cron reindex`): builds a new generation by reading both topics from the beginning without a consumer group, swaps both aliases in one atomic `_aliases` call, catches up on what arrived during the build, then deletes the old generation. Run it after every mapping change (bump `ElasticsearchSearch.MAPPING_VERSION`).
+- **Reindex** (`cron reindex`, or the backoffice through `POST /api/search/v1/admin/reindex`): builds a new generation by reading both topics from the beginning without a consumer group, refreshes it, swaps both aliases in one atomic `_aliases` call, catches up on what arrived during the build, then deletes the old generation. Run it after every mapping change (bump `ElasticsearchSearch.MAPPING_VERSION`). One run at a time across pods: a claim in Valkey (`SET NX` with a 15-minute timeout) and the last run's result live there; a second start answers `409 REINDEX_RUNNING`, and so does the cron while the backoffice's run holds the claim.
 - **Word starts and typos**: the last word of a search also matches as a prefix of dish and restaurant names (`search_as_you_type` fields, as in the suggestions), so "burg" finds burgers and "Trüff" Trüffelpommes. Typos are tolerated from five letters on (one edit up to seven, two from eight); below that a word is more likely unfinished, and one edit reaches too far ("marg" → "Magen"). Prefixes and synonyms do not combine: "Hähn" finds the Hähnchen dishes, not the ones called Chicken.
 - **German text**: `dictionary_decompounder` with a food word list splits compounds at index time ("Trüffelpommes" → "trüffel", "pommes"); query-time synonyms bridge German and English ("Pommes" ↔ "fries") and German words to the English mood, diet and cuisine keys ("käsig" → `cheesy`). Suggestions use `search_as_you_type` with ASCII folding ("pho" finds "Phở").
 - **Known limit**: a dish carries its restaurant's name from when the dish last changed. A restaurant rename shows up in dish search after the next reindex.

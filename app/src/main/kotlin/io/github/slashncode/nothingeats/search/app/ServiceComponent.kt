@@ -24,6 +24,9 @@ import io.github.slashncode.nothingeats.platform.posthog.PostHogAnalytics
 import io.github.slashncode.nothingeats.platform.posthog.PostHogExceptionReporter
 import io.github.slashncode.nothingeats.platform.posthog.PostHogHttpExtension
 import io.github.slashncode.nothingeats.platform.valkey.Valkey
+import io.github.slashncode.nothingeats.search.adapters.admin.AdminSearchRoutes
+import io.github.slashncode.nothingeats.search.adapters.admin.BackgroundJobs
+import io.github.slashncode.nothingeats.search.adapters.admin.ValkeyReindexRuns
 import io.github.slashncode.nothingeats.search.adapters.cron.ReindexTask
 import io.github.slashncode.nothingeats.search.adapters.elasticsearch.ElasticsearchClient
 import io.github.slashncode.nothingeats.search.adapters.elasticsearch.ElasticsearchSearch
@@ -45,6 +48,8 @@ import io.github.slashncode.nothingeats.search.application.EnsureLiveGeneration
 import io.github.slashncode.nothingeats.search.application.GetDishes
 import io.github.slashncode.nothingeats.search.application.ProjectCatalog
 import io.github.slashncode.nothingeats.search.application.Reindex
+import io.github.slashncode.nothingeats.search.application.ReindexRuns
+import io.github.slashncode.nothingeats.search.application.Reindexing
 import io.github.slashncode.nothingeats.search.application.RestaurantDirectory
 import io.github.slashncode.nothingeats.search.application.RetrieveDishes
 import io.github.slashncode.nothingeats.search.application.SearchDishes
@@ -233,13 +238,35 @@ abstract class ServiceComponent(
     @Provides
     fun catalogLog(): CatalogLog = KafkaCatalogLog(config.kafka, config.catalogTopics)
 
+    // Reindexing: from `cron reindex` and from the backoffice, one run at a time (claim in Valkey)
+
+    @ServiceScope
+    @Provides
+    fun backgroundJobs(): BackgroundJobs = BackgroundJobs()
+
     @IntoSet
     @Provides
-    fun reindex(
+    fun backgroundJobsLifecycle(jobs: BackgroundJobs): LifecycleComponent = jobs
+
+    @Provides
+    fun reindexRuns(valkey: Valkey): ReindexRuns = ValkeyReindexRuns(valkey)
+
+    @Provides
+    fun reindexing(
         indices: SearchIndices,
         log: CatalogLog,
         vectors: DishVectors,
-    ): CronTask = ReindexTask(Reindex(indices, log, vectors))
+        runs: ReindexRuns,
+        jobs: BackgroundJobs,
+    ): Reindexing = Reindexing(Reindex(indices, log, vectors), runs, indices, jobs.scope)
+
+    @IntoSet
+    @Provides
+    fun reindex(reindexing: Reindexing): CronTask = ReindexTask(reindexing)
+
+    @IntoSet
+    @Provides
+    fun adminRoutes(reindexing: Reindexing): HttpRoutes = AdminSearchRoutes(reindexing)
 
     // Search
 

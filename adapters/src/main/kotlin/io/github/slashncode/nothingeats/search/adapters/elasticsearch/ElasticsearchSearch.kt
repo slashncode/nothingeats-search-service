@@ -5,6 +5,7 @@ import io.github.slashncode.nothingeats.search.application.CatalogEvent
 import io.github.slashncode.nothingeats.search.application.DishIndex
 import io.github.slashncode.nothingeats.search.application.DishVector
 import io.github.slashncode.nothingeats.search.application.Generation
+import io.github.slashncode.nothingeats.search.application.IndexCounts
 import io.github.slashncode.nothingeats.search.application.RestaurantDirectory
 import io.github.slashncode.nothingeats.search.application.SearchIndices
 import io.github.slashncode.nothingeats.search.domain.CatalogVocabulary
@@ -131,6 +132,9 @@ class ElasticsearchSearch(
     )
 
     override suspend fun publish(generation: Generation): Generation? {
+        // Written documents become searchable with the next refresh (1 s); a generation swapped in
+        // before that would answer empty for a moment.
+        client.request("POST", "/${generation.dishes},${generation.restaurants}/_refresh")
         val previous = live()
         val actions =
             buildJsonObject {
@@ -149,6 +153,17 @@ class ElasticsearchSearch(
 
     override suspend fun drop(generation: Generation) {
         client.request("DELETE", "/${generation.dishes},${generation.restaurants}", accept = setOf(NOT_FOUND))
+    }
+
+    override suspend fun count(): IndexCounts = IndexCounts(countOf(dishAlias), countOf(restaurantAlias))
+
+    private suspend fun countOf(alias: String): Long {
+        val response = client.request("GET", "/$alias/_count", accept = setOf(NOT_FOUND))
+        if (response.status == NOT_FOUND) return 0
+        return response.body!!
+            .jsonObject
+            .getValue("count")
+            .jsonPrimitive.long
     }
 
     /** Makes recent writes searchable at once; for tests, production relies on the 1s refresh. */

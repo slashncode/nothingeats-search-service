@@ -54,6 +54,9 @@ interface SearchIndices {
     suspend fun publish(generation: Generation): Generation?
 
     suspend fun drop(generation: Generation)
+
+    /** Documents behind the live aliases; zero while there is no generation. */
+    suspend fun count(): IndexCounts
 }
 
 /** Where the replayed log ended, so a catch-up can continue exactly there. */

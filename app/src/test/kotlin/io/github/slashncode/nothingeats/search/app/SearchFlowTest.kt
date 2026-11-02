@@ -126,6 +126,41 @@ class SearchFlowTest :
                 eventually(30.seconds) { searchFries("$base/dishes?q=fries&lang=en")!!.text("priceCents") shouldBe "390" }
                 get("$base/dishes?size=50").second.text("total") shouldBe SeedCatalog.dishes.size.toString()
 
+                // The backoffice: the live index and the cron's run, then a reindex on request; customers are refused.
+                val adminToken = tokens.accessToken(userId = "boss", roles = setOf("admin"))
+
+                fun admin(
+                    method: String,
+                    path: String,
+                    token: String = adminToken,
+                ) = http.send(
+                    HttpRequest
+                        .newBuilder(URI("$base/admin$path"))
+                        .header("Authorization", "Bearer $token")
+                        .method(method, HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                    BodyHandlers.ofString(),
+                )
+
+                fun indexStatus() = Json.parseToJsonElement(admin("GET", "/index").body()).jsonObject
+
+                admin("GET", "/index", tokens.accessToken(userId = "craving-1")).statusCode() shouldBe 403
+                val afterCron = indexStatus()
+                afterCron.text("live") shouldBe service.search.live()!!.name
+                afterCron.text("dishes") shouldBe SeedCatalog.dishes.size.toString()
+                afterCron.getValue("last").jsonObject.text("generation") shouldBe afterCron.text("live")
+                val started = admin("POST", "/reindex")
+                started.statusCode() shouldBe 202
+                val runId = Json.parseToJsonElement(started.body()).jsonObject.text("id")
+                eventually(30.seconds) {
+                    val status = indexStatus()
+                    status.getValue("last").jsonObject.text("id") shouldBe runId
+                    // Null fields are left out of the JSON: no "running" while nothing runs.
+                    status["running"] shouldBe null
+                    status.text("live") shouldNotBe afterCron.text("live")
+                }
+                get("$base/dishes?size=50").second.text("total") shouldBe SeedCatalog.dishes.size.toString()
+
                 // Retrieval over gRPC, on the customer's behalf (hashed vectors: no key in tests).
                 val channel = GrpcChannel(GrpcClientConfig(target = "localhost:$grpcPort", deadline = 5.seconds, maxAttempts = 1))
                 try {

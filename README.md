@@ -58,7 +58,7 @@ RECORD_EMBEDDINGS=true OPENAI_API_KEY=... ./gradlew :adapters:test --tests '*Ret
 ```bash
 ./gradlew build                     # compile, ktlint, tests (Docker needed: Elasticsearch and Kafka via Testcontainers)
 
-# against the local k3d cluster from the host (Elasticsearch on 19200, Kafka on 19094, Valkey on 16379)
+# against the local k3d cluster from the host (Elasticsearch on 19200, Kafka on 19094 with the login from `just kafka-env`, Valkey on 16379)
 export ELASTICSEARCH__USERNAME=search-service ELASTICSEARCH__PASSWORD=... VALKEY__PASSWORD=...
 export EMBEDDINGS__PROVIDER=OPENAI EMBEDDINGS__OPENAI__API_KEY=...   # optional; hashing otherwise
 ./gradlew :app:run --args="cron reindex"

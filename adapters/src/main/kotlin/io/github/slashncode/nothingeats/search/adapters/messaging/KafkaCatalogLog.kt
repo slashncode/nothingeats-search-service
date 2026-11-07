@@ -79,13 +79,13 @@ class KafkaCatalogLog(
 
     private fun consumer() =
         KafkaConsumer(
-            mapOf<String, Any>(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to config.bootstrapServers,
-                ConsumerConfig.CLIENT_ID_CONFIG to "search-service-reindex",
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to false,
-                ConsumerConfig.ISOLATION_LEVEL_CONFIG to "read_committed",
-                ConsumerConfig.MAX_POLL_RECORDS_CONFIG to MAX_POLL_RECORDS,
-            ),
+            config.connection() +
+                mapOf(
+                    ConsumerConfig.CLIENT_ID_CONFIG to "search-service-reindex",
+                    ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to false,
+                    ConsumerConfig.ISOLATION_LEVEL_CONFIG to "read_committed",
+                    ConsumerConfig.MAX_POLL_RECORDS_CONFIG to MAX_POLL_RECORDS,
+                ),
             StringDeserializer(),
             ByteArrayDeserializer(),
         )

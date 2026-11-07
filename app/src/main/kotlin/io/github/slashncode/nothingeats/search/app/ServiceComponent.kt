@@ -16,6 +16,8 @@ import io.github.slashncode.nothingeats.platform.http.HttpExtension
 import io.github.slashncode.nothingeats.platform.http.HttpRoutes
 import io.github.slashncode.nothingeats.platform.http.HttpServer
 import io.github.slashncode.nothingeats.platform.http.auth.JwtAuth
+import io.github.slashncode.nothingeats.platform.kafka.ConsumerLag
+import io.github.slashncode.nothingeats.platform.kafka.ConsumerLagWatch
 import io.github.slashncode.nothingeats.platform.kafka.EventConsumer
 import io.github.slashncode.nothingeats.platform.kafka.EventConsumerConfig
 import io.github.slashncode.nothingeats.platform.kafka.EventHandler
@@ -50,6 +52,7 @@ import io.github.slashncode.nothingeats.search.application.ProjectCatalog
 import io.github.slashncode.nothingeats.search.application.Reindex
 import io.github.slashncode.nothingeats.search.application.ReindexRuns
 import io.github.slashncode.nothingeats.search.application.Reindexing
+import io.github.slashncode.nothingeats.search.application.RepairEmbeddings
 import io.github.slashncode.nothingeats.search.application.RestaurantDirectory
 import io.github.slashncode.nothingeats.search.application.RetrieveDishes
 import io.github.slashncode.nothingeats.search.application.SearchDishes
@@ -159,12 +162,18 @@ abstract class ServiceComponent(
     @Provides
     fun embeddingModel(valkey: Valkey): EmbeddingModel =
         when (config.embeddings.provider) {
+            EmbeddingProvider.HASHING -> uncachedEmbeddingModel()
+            EmbeddingProvider.OPENAI -> CachedEmbeddingModel(uncachedEmbeddingModel(), valkey, config.embeddings.cacheTtl)
+        }
+
+    private fun uncachedEmbeddingModel(): EmbeddingModel =
+        when (config.embeddings.provider) {
             EmbeddingProvider.HASHING -> HashingEmbeddingModel(config.embeddings.dimensions)
             EmbeddingProvider.OPENAI ->
-                CachedEmbeddingModel(
-                    OpenAiEmbeddingModel(config.embeddings.model, config.embeddings.dimensions, config.embeddings.openai),
-                    valkey,
-                    config.embeddings.cacheTtl,
+                OpenAiEmbeddingModel(
+                    config.embeddings.model,
+                    config.embeddings.dimensions,
+                    config.embeddings.openai,
                 )
         }
 
@@ -231,6 +240,12 @@ abstract class ServiceComponent(
     @Provides
     fun eventConsumerLifecycle(consumer: EventConsumer): LifecycleComponent = consumer
 
+    // Reports to error tracking when the group's events wait longer than 10 minutes.
+    @IntoSet
+    @Provides
+    fun consumerLagWatch(analytics: ProductAnalytics): LifecycleComponent =
+        ConsumerLagWatch("search-service", ConsumerLag(config.kafka), analytics)
+
     @IntoSet
     @Provides
     fun eventConsumerHealth(consumer: EventConsumer): HealthCheck = consumer
@@ -263,6 +278,15 @@ abstract class ServiceComponent(
     @IntoSet
     @Provides
     fun reindex(reindexing: Reindexing): CronTask = ReindexTask(reindexing)
+
+    // Dishes indexed while the embedding model was down get their vectors once it is back.
+    @IntoSet
+    @Provides
+    fun embeddingRepair(
+        indices: SearchIndices,
+        reindexing: Reindexing,
+        jobs: BackgroundJobs,
+    ): LifecycleComponent = EmbeddingRepairSchedule(RepairEmbeddings(indices, uncachedEmbeddingModel(), reindexing), jobs.scope)
 
     @IntoSet
     @Provides

@@ -23,6 +23,9 @@ class InMemorySearchIndices : SearchIndices {
 
     /** The vector each dish was last written with, by dish id. */
     val vectors = ConcurrentHashMap<String, DishVector>()
+
+    /** Per generation, the dishes last written without a vector. */
+    private val withoutVector = ConcurrentHashMap<String, MutableSet<String>>()
     var liveName: String? = null
     private var counter = 0
 
@@ -40,7 +43,12 @@ class InMemorySearchIndices : SearchIndices {
         vector: DishVector?,
     ) {
         if (event is CatalogEvent.DishPublished && vector != null) vectors[event.dish.id] = vector
-        val docs = generations.getValue((into ?: live() ?: error("no live generation")).name)
+        val generation = (into ?: live() ?: error("no live generation")).name
+        val docs = generations.getValue(generation)
+        if (event is CatalogEvent.DishPublished) {
+            val missing = withoutVector.computeIfAbsent(generation) { ConcurrentHashMap.newKeySet() }
+            if (vector == null) missing += event.dish.id else missing -= event.dish.id
+        }
         val id =
             when (event) {
                 is CatalogEvent.DishPublished -> "dish:${event.dish.id}"
@@ -62,7 +70,11 @@ class InMemorySearchIndices : SearchIndices {
     override suspend fun count() =
         liveName?.let { name ->
             val ids = generations.getValue(name).keys
-            IndexCounts(ids.count { it.startsWith("dish:") }.toLong(), ids.count { it.startsWith("restaurant:") }.toLong())
+            IndexCounts(
+                ids.count { it.startsWith("dish:") }.toLong(),
+                ids.count { it.startsWith("restaurant:") }.toLong(),
+                withoutVector[name]?.size?.toLong() ?: 0,
+            )
         } ?: IndexCounts(0, 0)
 
     fun documents(generation: String? = liveName) = generations.getValue(generation!!).keys.sorted()

@@ -155,10 +155,18 @@ class ElasticsearchSearch(
         client.request("DELETE", "/${generation.dishes},${generation.restaurants}", accept = setOf(NOT_FOUND))
     }
 
-    override suspend fun count(): IndexCounts = IndexCounts(countOf(dishAlias), countOf(restaurantAlias))
+    override suspend fun count(): IndexCounts =
+        IndexCounts(
+            countOf(dishAlias),
+            countOf(restaurantAlias),
+            countOf(dishAlias, """{"query": {"bool": {"must_not": {"exists": {"field": "embedding"}}}}}"""),
+        )
 
-    private suspend fun countOf(alias: String): Long {
-        val response = client.request("GET", "/$alias/_count", accept = setOf(NOT_FOUND))
+    private suspend fun countOf(
+        alias: String,
+        query: String? = null,
+    ): Long {
+        val response = client.request(if (query == null) "GET" else "POST", "/$alias/_count", query, accept = setOf(NOT_FOUND))
         if (response.status == NOT_FOUND) return 0
         return response.body!!
             .jsonObject

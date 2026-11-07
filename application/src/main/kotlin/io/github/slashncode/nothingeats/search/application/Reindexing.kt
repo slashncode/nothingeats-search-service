@@ -44,6 +44,8 @@ interface ReindexRuns {
 data class IndexCounts(
     val dishes: Long,
     val restaurants: Long,
+    /** Dishes indexed while the embedding model failed: found by keywords only. */
+    val dishesWithoutVector: Long = 0,
 )
 
 data class IndexStatus(

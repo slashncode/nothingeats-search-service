@@ -115,6 +115,16 @@ class ElasticsearchRetrievalTest :
                 .toString() shouldNotContain "embeddingModel"
         }
 
+        test("dishes written without a vector are counted, so a repair knows to reindex") {
+            val search = seeded().search
+            search.count().dishesWithoutVector shouldBe 0
+
+            search.write(CatalogEvent.DishPublished(SeedCatalog.dishes.first(), version = 1_000), vector = null)
+            search.refresh()
+
+            search.count().dishesWithoutVector shouldBe 1
+        }
+
         test("dishes by id come in the order asked; the vocabulary counts available dishes") {
             val search = seeded().search
 
